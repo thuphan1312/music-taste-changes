@@ -1,0 +1,317 @@
+---
+title: "How had music changed in the century betIen 1920 and 2020?"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include = FALSE}
+library(TTR)
+library(dplyr)
+library(tidyr)
+library(forecast)
+library(rpart)
+library(tree)
+library(zoo)
+library(tidyverse)
+library(broom)
+library(gbm)
+seed.val <-12345
+```
+
+
+```{r, include = FALSE}
+spotify.df <- read.csv("SpotifySongs.csv")
+# taking only the useful columns
+spotify.df <- spotify.df[,c(1,2,3,4,6,8,9,11,14,16,17,20,22)]
+#factor out the factors
+spotify.df$explicit <- factor(spotify.df$explicit)
+levels(spotify.df$explicit) <- c("false", "true")
+spotify.df$song.id <- factor(spotify.df$song.id)
+spotify.df$year <- factor(spotify.df$year)
+spotify.df$explicit <- factor(spotify.df$explicit)
+summary(spotify.df)
+```
+
+**Introduction**
+
+Over the past century, music has slowly became more and more important in everday's life. It goes from being nationally bradcasted, individually bought on big discs to being immediately available on handheld devices. The more accessible music becomes, the more it represents the culture and personality of different generations.  
+
+Growing up, I have heard so much from my parents about their music. I learned how romantic, smooth and soft it is. I learned how they would listen to it on the radio for hours. Comparing to today, however, I definitely don't enjoy slow music as much as they would. my music is loud, fast, and not radio-friendly.  
+
+**What do I hope to accomplish?**
+
+Knowing this distinction, I decided to study the changes of music over the years. I want to see if music with high attributes like danceability, loudness, tempo, and energy has been more popular in the past 50 years. I also want to see if music with attributes like accousticness, instrumentalness and longer songs have decreased in popularity over the years.   
+
+I can accomplish this by analyzing the top 100 songs from 1920 to 2020 on Spotify. The databse I use include more than 160,000 songs with scores indicating their attributes.    
+
+
+**Part 1: Overall trends throughout the century**
+
+The first thing I want to look at is the trend of these attributes.   
+
+```{r, echo = FALSE}
+# Time series with SMA to show trends over the years
+songs.ts.dance <- ts(spotify.df$danceability, start = 1920, end = 2020)
+plot.ts( SMA(songs.ts.dance, n = 10), ylab = "Danceability with SMA")
+
+songs.ts.tempo<- ts(spotify.df$tempo, start = 1920, end = 2020)
+plot.ts( SMA(songs.ts.tempo, n = 10), ylab = "Tempo with SMA")
+
+songs.ts.acousticness <- ts(spotify.df$acousticness, start=1920, end=2020)
+plot.ts(SMA(songs.ts.acousticness,n=10), ylab = "Acousticness with SMA")
+
+songs.ts.duration <- ts(spotify.df$duration_s,start=1920,end=2020)
+plot.ts(SMA(songs.ts.duration,n=10), ylab = "Duration with SMA")
+
+songs.ts.instrumentalness <- ts(spotify.df$instrumentalness,start=1920,end=2020)
+plot.ts(SMA(songs.ts.instrumentalness,n=10), ylab = "Instrumentalness with SMA")
+
+explicit.count <- spotify.df %>% group_by(spotify.df$year) %>% count(spotify.df$explicit)
+explicit.count <- subset(explicit.count, explicit.count$`spotify.df$explicit` %in% c('true'))
+plot(explicit.count[,c(1,3)], ylab = "Count of Explicit songs")
+
+```
+
+```{r, include = FALSE}
+
+#Does not show significant changes
+songs.ts.energy <- ts(spotify.df$energy, start = 1920, end = 2020)
+plot.ts( SMA(songs.ts.energy, n = 10))
+
+songs.ts.loudness <- ts(spotify.df$loudness, start = 1920, end = 2020)
+plot.ts( SMA(songs.ts.loudness, n = 10))
+
+```
+
+Over the times, I were able to notice some interesting changes in danceability, tempo, duration, acousticness, instrumentalness and explicitness.   
+
+As seen in the graph above, danceability has dropped significantly in the 2000s. It's around the loIst it has ever been. Taking into consideration the pop era of the 2010s, it is quite surprising to see a drop. Moreover, on the other hand, tempo has increased significantly in the 2000s. Songs have became faster, signaling the rise of club music, R&B and hip hop. This also corresponds to the surge in explicit songs. Since the late 2000s, explicit songs skyrocketed in numbers.   
+ 
+I can see that over time, the song duration was longest during 1960-1980, but has had less time after that. There were times where it had a slight increase, but the trends from 1980-2020 is similar throughout 1920-1960. Song duration from 1980-2020 is slightly less than 1920-1960 overall. Acoustics have reached its loIst peak for 1980, and the trend has increased 1980-2020, hoIver the acoustics levels is loIr compared to 1920-1980. Instrumental levels have periods of ups and downs, but overall the trend for instrumentals have gotten higher over time especially from 2000-2020.  
+
+Looking at the years, I can tell that, despite tempo and explicitness being a big part of all songs, danceability is not that strong of a factor in todays' music. Interestingly, songs with instrumental components have increased in numbers, signaling a shift in music production. 
+
+
+**Part 2: Correlation with popularity**
+
+Having learned these interesting trends in songs' attributes, I want to look further into their effects on popularity. But the years are still important to us, therefore, I split the years into two half. The first half contains 50 years from 1920 to 1977. The second half contains the remaining 50 years from 1977-2021.  
+
+```{r, include = FALSE}
+spotify.df <- spotify.df[order(spotify.df$year),]
+
+spotify.old <- spotify.df[1:(nrow(spotify.df) / 2), ]
+spotify.new <- spotify.df[(nrow(spotify.df) / 2) : nrow(spotify.df), ]
+```
+
+```{r,include = FALSE}
+spotify.df <- spotify.df[order(spotify.df$year),]
+spotify.old <- spotify.df[1:(nrow(spotify.df)/2),]
+spotify.new <- spotify.df[(nrow(spotify.df)/2):nrow(spotify.df),]
+fitdurationold <- lm(formula=popularity~duration_s+year,data=spotify.old)
+fitdurationnew <- lm(formula=popularity~duration_s+year,data=spotify.new)
+fitacousticnessold <- lm(formula=popularity~acousticness+year,data=spotify.old)
+fitacousticnessnew<- lm(formula=popularity~acousticness,data=spotify.new)
+fitinstrumentalnessold <- lm(formula=popularity~instrumentalness+year,data=spotify.old)
+fitinstrumentalnessnew<- lm(formula=popularity~instrumentalness+year,data=spotify.new)
+summary(fitdurationold)
+summary(fitdurationnew)
+summary(fitacousticnessold)
+summary(fitacousticnessnew)
+summary(fitinstrumentalnessold)
+summary(fitinstrumentalnessnew)
+
+durationmodelold_aug <- augment(fitdurationold,data=spotify.old)
+
+durationmodelnew_aug <- augment(fitdurationnew,data=spotify.new)
+
+acousticnessmodelold_aug <- augment(fitacousticnessold,data=spotify.old)
+
+acousticnessmodelnew_aug <- augment(fitacousticnessnew,data=spotify.new)
+
+instrumentalnessmodelold_aug <- augment(fitinstrumentalnessold,data=spotify.old)
+
+instrumentalnessmodelnew_aug <- augment(fitinstrumentalnessnew,data=spotify.new)
+```
+
+
+First, I take a look at the old school attributes with acousticness, instrumentalness and long durations. By plotting the trend of these attributes, I can see the changes below  
+
+```{r, echo = FALSE}
+ggplot(data=instrumentalnessmodelold_aug)+geom_point(mapping=aes(x=instrumentalness,y=popularity,color=year))+geom_line(mapping=aes(x=instrumentalness,y=.fitted,color=year))+ggtitle("Instrumentalness vs Popularity 1920-1977")
+
+ggplot(data=instrumentalnessmodelnew_aug)+geom_point(mapping=aes(x=instrumentalness,y=popularity,color=year))+geom_line(mapping=aes(x=instrumentalness,y=.fitted,color=year))+ggtitle("Instrumentalness vs Popularity 1977-2021")
+```
+
+```{r, echo = FALSE}
+ggplot(data=durationmodelold_aug)+geom_point(mapping=aes(x=duration_s,y=popularity,color=year))+geom_line(mapping=aes(x=duration_s,y=.fitted,color=year))+ggtitle("Duration vs Popularity 1920-1977")
+
+ggplot(data=durationmodelnew_aug)+geom_point(mapping=aes(x=duration_s,y=popularity,color=year))+geom_line(mapping=aes(x=duration_s,y=.fitted,color=year))+ggtitle("Duration vs Popularity 1977-2021")
+```
+
+```{r, echo = FALSE}
+ggplot(data=acousticnessmodelold_aug)+geom_point(mapping=aes(x=acousticness,y=popularity,color=year))+geom_line(mapping=aes(x=acousticness,y=.fitted,color=year))+ggtitle("Acousticness vs Popularity 1920-1977")
+
+ggplot(data=acousticnessmodelnew_aug)+geom_point(mapping=aes(x=acousticness,y=popularity,color=year))+geom_line(mapping=aes(x=acousticness,y=.fitted,color=year))+ggtitle("Acousticness vs Popularity 1977-2021")
+```
+
+As all linear regression fits have a p-value less than 0.05, I can conclude that the variables are statistically significant, meaning that they can reject the null hypothesis that acousticness,instrumentalness,and song duration don't have an effect on popularity. I can see that for 1920-1977, longer duration generates more popularity around 1960-1977. From 1977-2021, even though there's a negative correlation betIen duration and popularity, there seems to be a higher peak of popularity for longer duration songs from 1990-2000 and from 2020-2021, there's a big popularity for shorter duration. There seems to be a higher popularity for more acoustics from 1920-1977 as the years go by. From 1977-2021, there is also somewhat of a higher popularity peak for more acoustics overtime. From 1920-1977, there seems to be a higher popularity for instrumentals over time. From 1977-2021, there also seems to be a higher popularity correlation with more instrumentals over time.  
+
+Similarly, songs with modern attributes like danceability, energy, loudness and tempo also affect their popularity greatly. By conducting a stepwise regression analysis, I can see that almost all attributes are important over time.  
+
+```{r, include = FALSE}
+all.fit <- lm(formula = popularity ~ danceability + energy + loudness + tempo + explicit, data = spotify.df)
+summary(all.fit)
+
+old.fit <- lm(formula = popularity ~ danceability + energy + loudness + tempo + explicit, data = spotify.old)
+summary (old.fit)
+
+new.fit <- lm(formula = popularity ~ danceability + energy + loudness + tempo + explicit, data = spotify.new)
+summary(new.fit)
+```
+
+```{r, include = FALSE}
+#quite irrelevant and useless
+step(all.fit)
+```
+
+```{r, echo = FALSE}
+step(old.fit)
+```
+
+For the dataset with songs from older times, loudness is the only attribute that has no effects on songs' popularity. Looking at the results from the stepwise analysis, energy and tempo seems to have a positive effects on popularity in the old years. On the other hand, danceability and explicitness has a negative impacts on songs' popularity. This is especially true, considering the conservative culture at the time. Songs that are explicit and is fun to dance to must have been harshly viewed. Energy and non-explicitness Ire the most important attributes in making a song popular.  
+
+```{r, echo = FALSE}
+step(new.fit)
+```
+For the dataset with more modern songs, energy, tempo, loudness and explicit are all considered important. Danceability, however, isn't considered significant. Most importantly, explicitness and energy has the most effects on popularity. Unlike old times, explicitness has the highest positive impact on a song's popularity, while energy has the most negative impacts.  
+
+Looking at the results from the regression analysis, it looks like there are significant differences betwween old time and modern time. In the older years, longer songs that are accoustic, clean and has high energy seems to be the most popular. While in modern days, shorter songs that are explicit and fast are more dominant in the music industry.
+
+
+```{r, include = FALSE}
+
+#results of spotify.new stepwise analysis is off. Danceability shows insignificance but is still included. Therefore, I want to try the models with and without danceability. The model with danceability, the step model, performs a tiny bit better. So I will stick with the step model.
+
+new.train <- spotify.new[1:(nrow(spotify.new) * 0.8),]
+new.test <- spotify.new[(nrow(spotify.new) * 0.8): nrow(spotify.new) ,]
+
+fit.new.step <- lm(formula = popularity ~ danceability + energy + loudness + tempo + explicit, data = new.train)
+
+fit.new <- lm(formula = popularity ~ energy + loudness + tempo + explicit, data = new.train)
+
+pred.new <- predict(fit.new, new.test, interval = "prediction", level = 0.95)
+pred.new.step <- predict(fit.new.step, new.test, interval = "prediction", level = 0.95)
+
+pred.new.vals <- pred.new[,1]
+pred.new.step.vals <- pred.new.step[,1]
+actual.vals.new <- new.test$popularity
+
+rsme.new <- sqrt(mean((actual.vals.new - pred.new.vals)^2, na.rm = TRUE))
+rsme.new.step <- sqrt(mean((actual.vals.new - pred.new.step.vals)^2, na.rm = TRUE))
+```
+
+
+**PART 3: Trees**
+
+Lastly, I feel like it is important to consider a different test for correlation betIen my attributes and popularity. I chose to use decisions tree and pruning decision trees.  
+ 
+```{r, include = FALSE}
+set.seed(seed.val)
+data.size<-nrow(spotify.df)
+train.rows<-sample(1:data.size, data.size/2)
+train.data<-spotify.df[train.rows,]
+test.data<-spotify.df[-train.rows,]
+
+```
+
+```{r, echo = FALSE, warning = FALSE}
+tree.oldschool <- tree(formula=popularity~duration_s + acousticness + instrumentalness,data= spotify.old)
+plot(tree.oldschool,uniform=TRUE)
+text(tree.oldschool,use.n=TRUE,all=TRUE,cex=0.8)
+title("Old songs split by oldschool attributes")
+```
+
+```{r, echo = FALSE, warning = FALSE}
+tree.modern <- tree(formula=popularity~duration_s + acousticness + instrumentalness,data= spotify.new)
+plot(tree.modern,uniform=TRUE)
+text(tree.modern,use.n=TRUE,all=TRUE,cex=0.8)
+title("New songs split by oldschool attributes")
+```
+
+Based on the single decision tees results, I've gathered that although there are peaks where duration can be longer than 203.025 seconds, most song duration over time are less than 203.025 seconds. For acoustics, it seems like there were peaks of high and low acoustics over time, but there seems to be more of a trend on less acoustics in the recent years compared to the past. There are many peaks of low and high instrumentals over time, but there seems to be a gradual trend towards higher instrumentals compared to the past.  
+
+```{r, include = FALSE, warning=FALSE}
+tree.alltime <- tree(formula=popularity~duration_s + acousticness + instrumentalness,data= spotify.new)
+plot(tree.alltime,uniform=TRUE)
+text(tree.alltime,use.n=TRUE,all=TRUE,cex=0.8)
+
+cv.alltime<-cv.tree(tree.alltime)
+plot(cv.alltime$size, cv.alltime$dev, type="b")
+```
+
+```{r, echo = FALSE, warning=FALSE}
+alltime.prune <- prune.tree(tree.alltime, best = 3)
+plot(alltime.prune)
+text(alltime.prune)
+title("All songs split by oldschool attributes")
+```
+
+As I did the trees for the spotify data from 1920-1977, I’ve gathered that acousticness and duration are the most important variables. It’s shown that long durations and low acoustics are the most popular. For the spotify data from 1977-2021, acousticness and instrumentalness are the important variables. Songs with low instrumentals are shown to be the most popular, while those with higher acoustics and higher instrumentals are more popular than lower acoustics and higher instrumentals. Based on the prune tree, instrumentals and acoustics are the most important variables. Songs with low instrumentals are shown to be the most popular, followed by songs with high instrumentals and high acoustics.  
+
+
+```{r, echo = FALSE, warning=FALSE}
+tree.old <-tree(popularity ~ danceability + energy + tempo + explicit, method = "anova", data = spotify.old)
+plot(tree.old, uniform = TRUE)
+text(tree.old, use.n = TRUE, all = TRUE, cex = .8)
+title("Old songs split by modern attributes")
+```
+
+Looking at the single decision tree created by the old model, explicit songs seem to be the worst before the 1950. Just by being explicit, it puts the popularity score extremely low. Moreover, songs with high energy are very popular. Dances and disco and jazz must dominate these times.  
+
+```{r, echo = FALSE, warning=FALSE}
+tree.new <- tree(popularity ~ danceability + energy + loudness + tempo + explicit, method = "anova", data = spotify.new)
+plot(tree.new, uniform = TRUE)
+text(tree.new, use.n = TRUE, all = TRUE, cex = .8)
+title("New songs split by modern attributes")
+```
+
+On the other hand, modern day songs that are explicit will score much higher in popularity. This corresponds with the hip-hop era. Otherwise, songs must have tempo lower than 120 or higher than 140 to have good popularity. This is interesting because it may represent the two biggest music genre in modern time: ballad-pop versus rap.  
+
+
+```{r, include = FALSE, warning=FALSE}
+tree.all <- tree(popularity ~ danceability + energy + loudness + tempo + explicit, method = "anova", data = spotify.df)
+plot(tree.all, uniform = TRUE)
+text(tree.all, use.n = TRUE, all = TRUE, cex = .8)
+
+cv.all<-cv.tree(tree.all)
+plot(cv.all$size, cv.all$dev, type="b")
+```
+
+```{r, echo = FALSE, warning=FALSE}
+all.prune <- prune.tree(tree.all, best = 3)
+plot(all.prune)
+text(all.prune)
+title("All songs split by modern attributes")
+```
+
+After taking a last look at a pruned tree of the entire century, I can determine that only some modern attributes are important. Pruned tree are shortened trees with only the most importantly selected components throughout all the years. By using this method, I am able to tell that energy and explicitness are the most important features in famous songs over the years. Artists who make explicit songs surged in popularity and songs with high energy are also much more significant.   
+
+**Conclusion**
+
+My findings both agrees and disagrees with my initial thoughts. Music has became more explicit over the year, that is inarguable. But surpisingly, danceability and loudness has nothing to do with popular music. On the other hand, energy and tempo are very important. High energy, fast songs are beloved by the current generation. Not surprisingly, attributes like instrumentalness and acousticness are less important in term of popularity. Songs with low instrumentalness and low acousticness are more popular.   
+
+Overall, I determined some characteristics of songs that are more popular in modern days:  
+- Explicit  
+- Fast  
+- High energy  
+- Not acoustic  
+- Using more autotune :)  
+
+I hope that these findings can aid music producers and artists in understanding the desires of the audience and my parents to see the differences in today's music versus their music.
+
+
