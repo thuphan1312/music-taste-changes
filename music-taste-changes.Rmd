@@ -1,5 +1,5 @@
 ---
-title: "How had music changed in the century betIen 1920 and 2020?"
+title: "How had music changed in the century between 1920 and 2020?"
 output:
   pdf_document: default
   html_document: default
